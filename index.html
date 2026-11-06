@@ -1,0 +1,2378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HCAI 1.1.2">
+  <title>How a Language Model Writes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: manipulation;
+    }
+
+    body {
+      background-color: #E4E4E9;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #1D1D1F;
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    }
+
+    .viewport-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+    }
+
+    /* 16:9 Presentation Frame */
+    .frame-wrapper {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      position: relative;
+      background-color: #F5F5F7;
+      border-radius: 4px;
+      overflow: hidden;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      cursor: default;
+      flex-shrink: 0;
+    }
+
+    /* Frame Canvas Content (Bottom 15% reserved for captions) */
+    .frame-content {
+      position: absolute;
+      inset: 0;
+      padding: 3.5% 5% 15% 5%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: flex-start;
+    }
+
+    /* Header Bar */
+    .frame-header {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+      flex-shrink: 0;
+    }
+
+    .step-meta {
+      font-size: clamp(10px, 1.05cqi, 13px);
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #6E6E73;
+      margin-bottom: 4px;
+    }
+
+    .headline {
+      font-size: clamp(20px, 2.3cqi, 32px);
+      font-weight: 600;
+      color: #1D1D1F;
+      line-height: 1.2;
+      transition: opacity 0.2s ease;
+    }
+
+    .progress-marks {
+      display: flex;
+      gap: 6px;
+      padding-top: 4px;
+    }
+
+    .progress-mark {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: #D2D2D7;
+      transition: background-color 0.2s ease;
+    }
+
+    .progress-mark.active {
+      background-color: #3D6BFF;
+    }
+
+    /* Stage Area */
+    .stage {
+      width: 100%;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      position: relative;
+      min-height: 0;
+    }
+
+    /* Shared Chips & Predictions */
+    .sentence-container {
+      width: 100%;
+      min-height: 76px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 8px 10px;
+      line-height: 1.4;
+    }
+
+    .joined-text {
+      font-size: clamp(20px, 2.2cqi, 30px);
+      font-weight: 500;
+      color: #1D1D1F;
+    }
+
+    .token-chip {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 6px;
+      padding: 6px 10px 4px 10px;
+      font-size: clamp(15px, 1.6cqi, 22px);
+      font-weight: 500;
+      color: #1D1D1F;
+      animation: chipSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .token-chip .token-id {
+      font-size: clamp(9px, 0.85cqi, 11px);
+      color: #6E6E73;
+      font-weight: 400;
+      margin-top: 2px;
+    }
+
+    .token-chip.ai-token {
+      background-color: #3D6BFF;
+      border-color: #3D6BFF;
+      color: #FFFFFF;
+    }
+
+    .token-chip.ai-token .token-id {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .token-chip.amber-highlight {
+      outline: 3px solid #F5A623;
+      outline-offset: 2px;
+    }
+
+    @keyframes chipSlide {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .prediction-panel {
+      display: flex;
+      gap: 24px;
+      width: 100%;
+      max-width: 680px;
+      margin-top: 20px;
+      transition: opacity 0.3s ease;
+    }
+
+    .ai-symbol {
+      width: 44px;
+      height: 44px;
+      background-color: #3D6BFF;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .ai-symbol-core {
+      width: 18px;
+      height: 18px;
+      background-color: #FFFFFF;
+      border-radius: 50%;
+      transition: transform 0.6s ease;
+    }
+
+    .ai-symbol.pulsing .ai-symbol-core {
+      animation: gentlePulse 1.2s infinite ease-in-out;
+    }
+
+    @keyframes gentlePulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(0.65); }
+    }
+
+    .prediction-bars-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .prediction-caption {
+      font-size: clamp(11px, 0.95cqi, 13px);
+      color: #6E6E73;
+      font-weight: 500;
+      margin-bottom: 2px;
+    }
+
+    .pred-row {
+      display: grid;
+      grid-template-columns: 90px 1fr 48px;
+      align-items: center;
+      gap: 12px;
+      font-size: clamp(12px, 1.05cqi, 14px);
+    }
+
+    .pred-label {
+      color: #1D1D1F;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pred-label.selected {
+      color: #2F5BEA;
+      font-weight: 700;
+    }
+
+    .pred-bar-track {
+      width: 100%;
+      height: 10px;
+      background-color: #E4E4E9;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .pred-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 5px;
+      background-color: #A9BFFF;
+      transition: width 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .pred-bar-fill.top-bar {
+      background-color: #3D6BFF;
+    }
+
+    .pred-pct {
+      font-size: clamp(11px, 0.95cqi, 13px);
+      color: #6E6E73;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .comparison-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+      width: 100%;
+      padding-top: 12px;
+      margin-top: 20px;
+      border-top: 1px solid #D2D2D7;
+      animation: chipSlide 0.35s ease forwards;
+    }
+
+    .comp-col {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .comp-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6E6E73;
+    }
+
+    .marker-square {
+      width: 10px;
+      height: 10px;
+      background-color: #3D6BFF;
+      border-radius: 2px;
+    }
+
+    .marker-circle {
+      width: 10px;
+      height: 10px;
+      background-color: #F5A623;
+      border-radius: 50%;
+    }
+
+    .comp-big-num {
+      font-size: clamp(32px, 3.8cqi, 52px);
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .comp-big-num.blue { color: #3D6BFF; }
+    .comp-big-num.dark { color: #1D1D1F; }
+
+    .comp-desc {
+      font-size: clamp(12px, 1.05cqi, 14px);
+      color: #6E6E73;
+      line-height: 1.4;
+    }
+
+    .truth-callout {
+      grid-column: 1 / -1;
+      padding-top: 16px;
+      border-top: 1px solid #D2D2D7;
+      font-size: clamp(16px, 1.8cqi, 24px);
+      font-weight: 600;
+      color: #1D1D1F;
+    }
+
+    /* Scenario 3 Elements */
+    .s3-container {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .s3-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      width: 100%;
+    }
+
+    .s3-column {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+    }
+
+    .s3-track-row {
+      display: flex;
+      align-items: center;
+      position: relative;
+      height: 16px;
+    }
+
+    .s3-circle {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid #D2D2D7;
+      background-color: #F5F5F7;
+      flex-shrink: 0;
+      transition: background-color 0.25s ease, border-color 0.25s ease;
+      z-index: 2;
+    }
+
+    .s3-circle.active {
+      background-color: #3D6BFF;
+      border-color: #3D6BFF;
+    }
+
+    .s3-connector {
+      position: absolute;
+      left: 12px;
+      width: calc(100% + 14px - 12px);
+      height: 2px;
+      background-color: #D2D2D7;
+      top: 5px;
+      transition: background-color 0.25s ease;
+      z-index: 1;
+    }
+
+    .s3-connector.active {
+      background-color: #3D6BFF;
+    }
+
+    .s3-stage-name {
+      font-size: clamp(9px, 0.85cqi, 11px);
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #6E6E73;
+      transition: color 0.25s ease;
+    }
+
+    .s3-stage-name.active {
+      color: #1D1D1F;
+    }
+
+    .s3-drop-zone {
+      min-height: 132px;
+      border: 1.5px dashed #D2D2D7;
+      border-radius: 8px;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+
+    .s3-drop-zone.drag-hover {
+      border: 1.5px solid #6E6E73;
+      background-color: #FFFFFF;
+    }
+
+    .s3-divider {
+      width: 100%;
+      height: 1px;
+      background-color: #D2D2D7;
+    }
+
+    .s3-tray-area {
+      min-height: 84px;
+      position: relative;
+    }
+
+    .s3-tray-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 14px;
+      width: 100%;
+    }
+
+    .s3-card {
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 6px;
+      padding: 6px 8px;
+      cursor: grab;
+      touch-action: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      height: 38px;
+      will-change: transform;
+      outline: none;
+    }
+
+    .s3-card * { pointer-events: none; }
+
+    .s3-card-date {
+      font-size: clamp(9px, 0.8cqi, 10px);
+      font-weight: 500;
+      color: #6E6E73;
+      line-height: 1;
+    }
+
+    .s3-card-title {
+      font-size: clamp(11px, 0.95cqi, 12px);
+      font-weight: 600;
+      color: #1D1D1F;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .s3-card.placed { cursor: default; }
+
+    .s3-card.dragging {
+      cursor: grabbing;
+      border-color: #6E6E73 !important;
+      z-index: 1000 !important;
+      transform-origin: center center;
+    }
+
+    .s3-reveal-panel {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-top: 4px;
+      animation: chipSlide 0.4s ease forwards;
+    }
+
+    .s3-reveal-questions {
+      display: flex;
+      gap: 40px;
+      align-items: center;
+    }
+
+    .s3-reveal-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: clamp(16px, 1.8cqi, 22px);
+      font-weight: 600;
+      color: #1D1D1F;
+    }
+
+    .ai-symbol-small {
+      width: 22px;
+      height: 22px;
+      background-color: #3D6BFF;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .ai-symbol-small-core {
+      width: 8px;
+      height: 8px;
+      background-color: #FFFFFF;
+      border-radius: 50%;
+    }
+
+    .human-amber-marker {
+      width: 16px;
+      height: 16px;
+      background-color: #F5A623;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .s3-reveal-subtext {
+      font-size: clamp(12px, 1.05cqi, 14px);
+      color: #6E6E73;
+      line-height: 1.4;
+    }
+
+    /* Scenario 4 & 5 Shared Containers */
+    .lab-container {
+      width: 100%;
+      height: 100%;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
+      min-height: 0;
+    }
+
+    .lab-instruction-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 6px;
+      padding: 7px 12px;
+      flex-shrink: 0;
+    }
+
+    .lab-instruction-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #3D6BFF;
+      background: rgba(61, 107, 255, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .lab-instruction-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: #1D1D1F;
+    }
+
+    .pill-btn {
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid #D2D2D7;
+      background: #FFFFFF;
+      color: #1D1D1F;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .pill-btn.active {
+      background: #3D6BFF;
+      border-color: #3D6BFF;
+      color: #FFFFFF;
+    }
+
+    /* 4.1: Temperature */
+    .s4-temp-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+
+    .s4-slider {
+      flex: 1;
+      min-width: 160px;
+      height: 6px;
+      accent-color: #3D6BFF;
+      cursor: pointer;
+    }
+
+    .s4-bars-box {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 10px;
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 8px;
+      padding: 16px 20px;
+    }
+
+    .s4-sample-output {
+      padding: 12px 16px;
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.45;
+      color: #1D1D1F;
+      flex-shrink: 0;
+    }
+
+    /* 4.2: Attention */
+    .s4-attention-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      position: relative;
+    }
+
+    .s4-attention-sentence {
+      position: relative;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      padding: 60px 16px 20px 16px;
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 8px;
+      flex: 1;
+    }
+
+    .s4-token-btn {
+      background: #F5F5F7;
+      border: 1px solid #D2D2D7;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 15px;
+      font-weight: 500;
+      color: #1D1D1F;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.15s ease;
+    }
+
+    .s4-token-btn.focus-word {
+      border-color: #3D6BFF;
+      background-color: #3D6BFF;
+      color: #FFFFFF;
+    }
+
+    .s4-token-btn.target-word {
+      border-color: #3D6BFF;
+      background-color: rgba(61, 107, 255, 0.12);
+      font-weight: 600;
+    }
+
+    .s4-token-btn .attn-pct {
+      position: absolute;
+      bottom: -18px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      font-weight: 700;
+      color: #2F5BEA;
+    }
+
+    .s4-attn-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    /* Scene 5 Demo Elements */
+    .s5-demo-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+      min-height: 240px;
+    }
+
+    .s5-grid-3d {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      perspective: 1000px;
+      transform-style: preserve-3d;
+      padding: 30px;
+    }
+
+    .s5-3d-card {
+      width: 100px;
+      height: 90px;
+      background: #3D6BFF;
+      border-radius: 8px;
+      transition: transform 0.1s ease-out;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #FFFFFF;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .s5-sort-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      max-width: 440px;
+    }
+
+    .s5-sort-item {
+      background: #FFFFFF;
+      border: 1px solid #D2D2D7;
+      border-radius: 6px;
+      padding: 14px 18px;
+      cursor: grab;
+      font-weight: 500;
+      color: #1D1D1F;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      touch-action: none;
+      transition: border-color 0.15s ease;
+    }
+
+    .s5-sort-item.dragging {
+      cursor: grabbing;
+      border-color: #3D6BFF;
+      z-index: 10;
+      opacity: 0.9;
+    }
+
+    .s5-chart-box {
+      display: flex;
+      align-items: flex-end;
+      gap: 14px;
+      height: 190px;
+      width: 100%;
+      max-width: 520px;
+      border-bottom: 2px solid #D2D2D7;
+      padding-bottom: 8px;
+    }
+
+    .s5-bar {
+      flex: 1;
+      background: #3D6BFF;
+      border-radius: 4px 4px 0 0;
+      transition: height 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .s5-wave-grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 10px;
+      padding: 24px;
+    }
+
+    .s5-wave-dot {
+      width: 16px;
+      height: 16px;
+      background: #E4E4E9;
+      border-radius: 50%;
+      transition: transform 0.4s ease, background-color 0.4s ease;
+      cursor: pointer;
+    }
+
+    .s5-wave-dot.active {
+      transform: scale(1.6);
+      background-color: #3D6BFF;
+      transition: transform 0.1s, background-color 0.1s;
+    }
+
+    /* Presenter Controls */
+    .controls-wrapper {
+      width: 100%;
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button.btn {
+      min-height: 44px;
+      padding: 0 16px;
+      border-radius: 8px;
+      border: 1px solid #D2D2D7;
+      background-color: #FFFFFF;
+      color: #1D1D1F;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    button.btn:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    button.btn:active:not(:disabled) {
+      background-color: #F5F5F7;
+    }
+
+    button.btn.active {
+      background-color: #3D6BFF;
+      border-color: #3D6BFF;
+      color: #FFFFFF;
+    }
+
+    .step-display {
+      font-size: 14px;
+      font-weight: 600;
+      color: #6E6E73;
+      padding: 0 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .footnote {
+      width: 100%;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #6E6E73;
+      line-height: 1.4;
+      text-align: left;
+    }
+
+    /* Help Overlay */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal-box {
+      background: #FFFFFF;
+      padding: 24px;
+      border-radius: 12px;
+      max-width: 520px;
+      width: 90%;
+      border: 1px solid #D2D2D7;
+    }
+
+    .modal-box h3 {
+      font-size: 18px;
+      margin-bottom: 12px;
+    }
+
+    .modal-box ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 13px;
+      color: #1D1D1F;
+      margin-bottom: 20px;
+    }
+
+    .modal-box kbd {
+      background: #E4E4E9;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-weight: 600;
+    }
+
+    /* Clean Frame Mode */
+    body.clean-mode .controls-wrapper,
+    body.clean-mode .footnote {
+      display: none !important;
+    }
+
+    body.clean-mode {
+      padding: 0;
+      background-color: #000000;
+    }
+
+    body.clean-mode .viewport-container {
+      height: 100%;
+      justify-content: center;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="viewport-container">
+    <div class="frame-wrapper" id="presentationFrame">
+      <div class="frame-content">
+        <div class="frame-header">
+          <div>
+            <div class="step-meta" id="stepMeta">HOW A LANGUAGE MODEL WRITES — STEP 1 OF 9</div>
+            <div class="headline" id="headline">A sentence</div>
+          </div>
+          <div class="progress-marks" id="progressMarks"></div>
+        </div>
+
+        <div class="stage" id="stageContainer">
+          <!-- Scenarios 1 & 2 -->
+          <div class="sentence-container" id="sentenceContainer"></div>
+
+          <div class="prediction-panel" id="predPanel" style="display: none;">
+            <div class="ai-symbol" id="aiSymbol">
+              <div class="ai-symbol-core"></div>
+            </div>
+            <div class="prediction-bars-wrapper">
+              <div class="prediction-caption" id="predCaption">Top 5 of about 100,000 possible next tokens</div>
+              <div id="predictionList"></div>
+            </div>
+          </div>
+
+          <div class="comparison-container" id="compContainer" style="display: none;">
+            <div class="comp-col">
+              <div class="comp-header">
+                <div class="marker-square"></div>
+                <span>Generated by the model</span>
+              </div>
+              <div class="comp-big-num blue">1956</div>
+              <div class="comp-desc">The date most often linked to the term in the text it learned from.</div>
+            </div>
+            <div class="comp-col">
+              <div class="comp-header">
+                <div class="marker-circle"></div>
+                <span>Checked against the source</span>
+              </div>
+              <div class="comp-big-num dark">1955</div>
+              <div class="comp-desc">The term first appears in the 1955 proposal for the 1956 Dartmouth workshop.</div>
+            </div>
+            <div class="truth-callout">
+              Pattern generation <span style="color: #3D6BFF;">≠</span> guaranteed truth
+            </div>
+          </div>
+
+          <!-- Scenario 3 -->
+          <div class="s3-container" id="s3Container" style="display: none;">
+            <div class="s3-grid" id="s3ColumnsGrid"></div>
+            <div class="s3-divider"></div>
+            <div class="s3-tray-area">
+              <div class="s3-tray-grid" id="s3CardTray"></div>
+              <div class="s3-reveal-panel" id="s3RevealPanel" style="display: none;">
+                <div class="s3-reveal-questions">
+                  <div class="s3-reveal-item">
+                    <div class="ai-symbol-small">
+                      <div class="ai-symbol-small-core"></div>
+                    </div>
+                    <span>Can the machine do it?</span>
+                  </div>
+                  <div class="s3-reveal-item">
+                    <div class="human-amber-marker"></div>
+                    <span>Should the machine do it?</span>
+                  </div>
+                </div>
+                <div class="s3-reveal-subtext">
+                  All of it? Part of it? Who decides? Who is accountable?
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Scenario 4: AI Lab -->
+          <div class="lab-container" id="s4Container" style="display: none;"></div>
+
+          <!-- Scenario 5: Showcase -->
+          <div class="lab-container" id="s5Container" style="display: none;"></div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls Outside Frame -->
+    <div class="controls-wrapper" id="controls">
+      <div class="control-group">
+        <button class="btn active" id="btnScen1">1 · Next token</button>
+        <button class="btn" id="btnScen2">2 · Likely vs. true</button>
+        <button class="btn" id="btnScen3">3 · Timeline</button>
+        <button class="btn" id="btnScen4">4 · AI lab</button>
+        <button class="btn" id="btnScen5">5 · Showcase</button>
+      </div>
+
+      <div class="control-group">
+        <button class="btn" id="btnBack">Back</button>
+        <span class="step-display" id="stepCounter">1 / 9</span>
+        <button class="btn" id="btnNext">Next</button>
+      </div>
+
+      <div class="control-group">
+        <button class="btn" id="btnProgress">Progress</button>
+        <button class="btn" id="btnClean">Clean frame</button>
+        <button class="btn" id="btnFull">Full screen</button>
+        <button class="btn" id="btnHelp">?</button>
+      </div>
+    </div>
+
+    <div class="footnote">
+      Simplified illustration for 1.1.2 'From Rules to Generative AI.' Token IDs and probabilities are representative, not taken from a specific model.
+    </div>
+  </div>
+
+  <!-- Help Panel Modal -->
+  <div class="modal-overlay" id="helpModal">
+    <div class="modal-box">
+      <h3>Presenter Navigation</h3>
+      <ul>
+        <li><kbd>Tap right 70%</kbd> or <kbd>Swipe Left</kbd> or <kbd>→</kbd> / <kbd>Space</kbd> : Next step</li>
+        <li><kbd>Tap left 30%</kbd> or <kbd>Swipe Right</kbd> or <kbd>←</kbd> : Previous step</li>
+        <li><kbd>Press &amp; Hold 0.7s</kbd> or <kbd>C</kbd> / <kbd>Esc</kbd> : Toggle Clean frame mode</li>
+        <li><kbd>1</kbd> to <kbd>5</kbd> : Switch scenarios</li>
+        <li>Scenario 3: Drag cards to columns, tap cards, or press Next to auto-advance.</li>
+        <li>Scenario 4: Live temperature distribution and context attention routing.</li>
+        <li>Scenario 5: 6 interactive prototypes (physics, 3D tilt, list sorting, data morph, waves, canvas).</li>
+        <li><kbd>R</kbd> : Restart scenario / <kbd>F</kbd> : Full screen / <kbd>P</kbd> : Toggle progress marks</li>
+      </ul>
+      <button class="btn" style="width: 100%;" id="btnCloseHelp">Close</button>
+    </div>
+  </div>
+
+  <script>
+    /* Data Definitions */
+    const S1_TOKENS = [
+      { t: "The", id: "791" },
+      { t: " best", id: "1888" },
+      { t: " way", id: "1648" },
+      { t: " to", id: "311" },
+      { t: " learn", id: "4048" },
+      { t: " something", id: "2555" },
+      { t: " new", id: "502" },
+      { t: " is", id: "374" },
+      { t: " to", id: "311" }
+    ];
+
+    const S1_ROUNDS = [
+      { preds: [{ t: " practice", p: 41 }, { t: " teach", p: 22 }, { t: " start", p: 14 }, { t: " make", p: 9 }, { t: " ask", p: 6 }], pick: { t: " practice", id: "6725" } },
+      { preds: [{ t: " it", p: 46 }, { t: " with", p: 18 }, { t: " by", p: 12 }, { t: " and", p: 9 }, { t: " regularly", p: 6 }], pick: { t: " it", id: "433" } },
+      { preds: [{ t: " every", p: 39 }, { t: " daily", p: 21 }, { t: " often", p: 14 }, { t: " .", p: 11 }, { t: " yourself", p: 5 }], pick: { t: " every", id: "1475" } },
+      { preds: [{ t: " day", p: 71 }, { t: " week", p: 9 }, { t: " morning", p: 8 }, { t: " single", p: 6 }, { t: " time", p: 3 }], pick: { t: " day", id: "1938" } },
+      { preds: [{ t: " .", p: 64 }, { t: " ,", p: 15 }, { t: " and", p: 9 }, { t: " for", p: 6 }, { t: " !", p: 3 }], pick: { t: ".", id: "13" } }
+    ];
+
+    const S2_TOKENS = [
+      { t: "The", id: "791" },
+      { t: " term", id: "4751" },
+      { t: " “", id: "1054" },
+      { t: "artificial", id: "16039" },
+      { t: " intelligence", id: "11478" },
+      { t: "”", id: "863" },
+      { t: " was", id: "574" },
+      { t: " first", id: "1176" },
+      { t: " used", id: "1511" },
+      { t: " in", id: "304" }
+    ];
+
+    const S2_ROUNDS = [
+      { preds: [{ t: " 1956", p: 58 }, { t: " 1955", p: 17 }, { t: " the", p: 11 }, { t: " a", p: 8 }, { t: " 1950", p: 3 }], pick: { t: " 1956", id: "27024" } },
+      { preds: [{ t: " .", p: 86 }, { t: " at", p: 6 }, { t: " ,", p: 4 }, { t: " by", p: 2 }, { t: " and", p: 1 }], pick: { t: ".", id: "13" } }
+    ];
+
+    const S3_STAGES = [
+      { name: "CALCULATION" },
+      { name: "RULES" },
+      { name: "PATTERNS" },
+      { name: "GENERATION" },
+      { name: "ACTION" }
+    ];
+
+    const S3_CARDS = [
+      { id: 1, date: "Ancient", title: "Abacus", stage: 0 },
+      { id: 2, date: "1642", title: "Pascal’s calculator", stage: 0 },
+      { id: 3, date: "1830s–40s", title: "Babbage & Lovelace", stage: 1 },
+      { id: 4, date: "1936", title: "Turing", stage: 1 },
+      { id: 5, date: "1955–56", title: "Dartmouth", stage: 1 },
+      { id: 6, date: "1980s", title: "Backpropagation", stage: 2 },
+      { id: 7, date: "2010s", title: "Deep learning", stage: 2 },
+      { id: 8, date: "2017", title: "Transformer", stage: 3 },
+      { id: 9, date: "Today", title: "Tools and agents", stage: 4 }
+    ];
+
+    /* Presentation State */
+    let currentScenario = 1;
+    let currentStep = 1;
+    let autoAdvanceTimer = null;
+    let showProgress = true;
+    let globalAnimFrame = null;
+
+    let s3PlacedStack = [];
+    let s3IsReveal = false;
+    let s4Temp = 0.7;
+    let s4AttnVersion = 'tired';
+    let s4AttnSelected = 'it';
+
+    /* DOM References */
+    const frame = document.getElementById('presentationFrame');
+    const stepMeta = document.getElementById('stepMeta');
+    const headline = document.getElementById('headline');
+    const progressMarks = document.getElementById('progressMarks');
+    const sentenceContainer = document.getElementById('sentenceContainer');
+    const predPanel = document.getElementById('predPanel');
+    const aiSymbol = document.getElementById('aiSymbol');
+    const predictionList = document.getElementById('predictionList');
+    const compContainer = document.getElementById('compContainer');
+    const stepCounter = document.getElementById('stepCounter');
+    const btnNext = document.getElementById('btnNext');
+
+    const s3Container = document.getElementById('s3Container');
+    const s3ColumnsGrid = document.getElementById('s3ColumnsGrid');
+    const s3CardTray = document.getElementById('s3CardTray');
+    const s3RevealPanel = document.getElementById('s3RevealPanel');
+    const s4Container = document.getElementById('s4Container');
+    const s5Container = document.getElementById('s5Container');
+
+    const scenariosConfig = {
+      1: {
+        name: "HOW A LANGUAGE MODEL WRITES",
+        totalSteps: 9,
+        headlines: [
+          "A sentence",
+          "Broken into tokens",
+          "What is likely to come next?",
+          "Pick a likely token and add it",
+          "Then predict again",
+          "Then predict again",
+          "And again",
+          "And again",
+          "One token at a time"
+        ]
+      },
+      2: {
+        name: "LIKELY IS NOT THE SAME AS TRUE",
+        totalSteps: 5,
+        headlines: [
+          "A familiar fact",
+          "What is likely to come next?",
+          "The most likely token wins",
+          "Fluent and confident",
+          "Likely is not the same as true"
+        ]
+      },
+      3: {
+        name: "FROM CALCULATION TO ACTION",
+        totalSteps: 11
+      },
+      4: {
+        name: "INTERACTIVE AI LAB",
+        totalSteps: 2,
+        headlines: [
+          "Temperature: randomness vs. rigidity",
+          "Self-attention: connecting words in context"
+        ]
+      },
+      5: {
+        name: "INTERACTIVE SHOWCASE",
+        totalSteps: 6,
+        headlines: [
+          "Particle Physics Engine",
+          "3D Hover & Parallax Cards",
+          "Fluid Drag-and-Drop Sorting",
+          "Morphing Data Visualization",
+          "Touch-Reactive Wave Grid",
+          "Interactive Drawing Canvas"
+        ]
+      }
+    };
+
+    function formatTokenText(text) {
+      return text.startsWith(" ") ? "· " + text.slice(1) : text;
+    }
+
+    function createChip(tokenText, id, isAI = false, amberHighlight = false, animate = true) {
+      const chip = document.createElement('div');
+      chip.className = 'token-chip' + (isAI ? ' ai-token' : '') + (amberHighlight ? ' amber-highlight' : '');
+      if (!animate) chip.style.animation = 'none';
+
+      const label = document.createElement('span');
+      label.textContent = formatTokenText(tokenText);
+      chip.appendChild(label);
+
+      if (id) {
+        const idSpan = document.createElement('span');
+        idSpan.className = 'token-id';
+        idSpan.textContent = id;
+        chip.appendChild(idSpan);
+      }
+      return chip;
+    }
+
+    function renderBars(predictions, pickedToken = null) {
+      predictionList.innerHTML = '';
+      predictions.forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'pred-row';
+        row.innerHTML = `
+          <div class="pred-label ${pickedToken === item.t ? 'selected' : ''}">${item.t}</div>
+          <div class="pred-bar-track">
+            <div class="pred-bar-fill ${index === 0 ? 'top-bar' : ''}" style="width: 0%;"></div>
+          </div>
+          <div class="pred-pct">${item.p}%</div>
+        `;
+        predictionList.appendChild(row);
+
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            row.querySelector('.pred-bar-fill').style.width = item.p + '%';
+          }, 20 + index * 30);
+        });
+      });
+    }
+
+    function updateHeadline(text) {
+      if (headline.textContent !== text) {
+        headline.style.opacity = '0';
+        setTimeout(() => {
+          headline.textContent = text;
+          headline.style.opacity = '1';
+        }, 150);
+      }
+    }
+
+    /* Master Render */
+    function render() {
+      clearTimeout(autoAdvanceTimer);
+      if (globalAnimFrame) {
+        cancelAnimationFrame(globalAnimFrame);
+        globalAnimFrame = null;
+      }
+      btnNext.disabled = false;
+
+      const scen = scenariosConfig[currentScenario];
+      stepMeta.textContent = `${scen.name} — STEP ${currentStep} OF ${scen.totalSteps}`;
+      stepCounter.textContent = `${currentStep} / ${scen.totalSteps}`;
+
+      progressMarks.innerHTML = '';
+      progressMarks.style.display = showProgress ? 'flex' : 'none';
+      for (let i = 1; i <= scen.totalSteps; i++) {
+        const mark = document.createElement('div');
+        mark.className = 'progress-mark' + (i <= currentStep ? ' active' : '');
+        progressMarks.appendChild(mark);
+      }
+
+      sentenceContainer.style.display = 'none';
+      predPanel.style.display = 'none';
+      compContainer.style.display = 'none';
+      s3Container.style.display = 'none';
+      s4Container.style.display = 'none';
+      s5Container.style.display = 'none';
+      aiSymbol.classList.remove('pulsing');
+
+      if (currentScenario === 1 || currentScenario === 2) {
+        sentenceContainer.style.display = 'flex';
+        sentenceContainer.innerHTML = '';
+        updateHeadline(scen.headlines[currentStep - 1]);
+        if (currentScenario === 1) renderScenario1();
+        else renderScenario2();
+      } else if (currentScenario === 3) {
+        s3Container.style.display = 'flex';
+        renderScenario3();
+      } else if (currentScenario === 4) {
+        s4Container.style.display = 'flex';
+        updateHeadline(scen.headlines[currentStep - 1]);
+        renderScenario4();
+      } else if (currentScenario === 5) {
+        s5Container.style.display = 'flex';
+        updateHeadline(scen.headlines[currentStep - 1]);
+        renderScenario5();
+      }
+    }
+
+    function renderScenario1() {
+      if (currentStep === 1) {
+        const span = document.createElement('div');
+        span.className = 'joined-text';
+        span.textContent = S1_TOKENS.map(t => t.t).join('');
+        sentenceContainer.appendChild(span);
+        return;
+      }
+
+      S1_TOKENS.forEach(t => sentenceContainer.appendChild(createChip(t.t, t.id, false, false, false)));
+
+      if (currentStep >= 4) sentenceContainer.appendChild(createChip(S1_ROUNDS[0].pick.t, S1_ROUNDS[0].pick.id, true, false, currentStep === 4));
+      if (currentStep >= 6) sentenceContainer.appendChild(createChip(S1_ROUNDS[1].pick.t, S1_ROUNDS[1].pick.id, true, false, currentStep === 6));
+      if (currentStep >= 7) sentenceContainer.appendChild(createChip(S1_ROUNDS[2].pick.t, S1_ROUNDS[2].pick.id, true, false, true));
+      if (currentStep >= 8) sentenceContainer.appendChild(createChip(S1_ROUNDS[3].pick.t, S1_ROUNDS[3].pick.id, true, false, true));
+      if (currentStep >= 9) sentenceContainer.appendChild(createChip(S1_ROUNDS[4].pick.t, S1_ROUNDS[4].pick.id, true, false, true));
+
+      if (currentStep === 3) {
+        predPanel.style.display = 'flex';
+        aiSymbol.classList.add('pulsing');
+        renderBars(S1_ROUNDS[0].preds);
+      } else if (currentStep === 4) {
+        predPanel.style.display = 'flex';
+        renderBars(S1_ROUNDS[0].preds, S1_ROUNDS[0].pick.t);
+      } else if (currentStep === 5) {
+        predPanel.style.display = 'flex';
+        aiSymbol.classList.add('pulsing');
+        renderBars(S1_ROUNDS[1].preds);
+      } else if (currentStep === 6) {
+        predPanel.style.display = 'flex';
+        renderBars(S1_ROUNDS[1].preds, S1_ROUNDS[1].pick.t);
+      } else if (currentStep === 7) {
+        predPanel.style.display = 'flex';
+        aiSymbol.classList.add('pulsing');
+        renderBars(S1_ROUNDS[2].preds, S1_ROUNDS[2].pick.t);
+        autoAdvanceTimer = setTimeout(() => nextStep(true), 1500);
+      } else if (currentStep === 8) {
+        predPanel.style.display = 'flex';
+        renderBars(S1_ROUNDS[3].preds, S1_ROUNDS[3].pick.t);
+        autoAdvanceTimer = setTimeout(() => nextStep(true), 1500);
+      } else if (currentStep === 9) {
+        predPanel.style.display = 'flex';
+        renderBars(S1_ROUNDS[4].preds, S1_ROUNDS[4].pick.t);
+      }
+    }
+
+    function renderScenario2() {
+      if (currentStep === 1) {
+        const span = document.createElement('div');
+        span.className = 'joined-text';
+        span.textContent = S2_TOKENS.map(t => t.t).join('');
+        sentenceContainer.appendChild(span);
+        return;
+      }
+
+      S2_TOKENS.forEach(t => sentenceContainer.appendChild(createChip(t.t, t.id, false, false, false)));
+
+      if (currentStep >= 3) sentenceContainer.appendChild(createChip(S2_ROUNDS[0].pick.t, S2_ROUNDS[0].pick.id, true, currentStep === 5, currentStep === 3));
+      if (currentStep >= 4) sentenceContainer.appendChild(createChip(S2_ROUNDS[1].pick.t, S2_ROUNDS[1].pick.id, true, false, currentStep === 4));
+
+      if (currentStep === 2) {
+        predPanel.style.display = 'flex';
+        aiSymbol.classList.add('pulsing');
+        renderBars(S2_ROUNDS[0].preds);
+      } else if (currentStep === 3) {
+        predPanel.style.display = 'flex';
+        renderBars(S2_ROUNDS[0].preds, S2_ROUNDS[0].pick.t);
+      } else if (currentStep === 4) {
+        predPanel.style.display = 'flex';
+        renderBars(S2_ROUNDS[1].preds, S2_ROUNDS[1].pick.t);
+      } else if (currentStep === 5) {
+        predPanel.style.display = 'none';
+        compContainer.style.display = 'grid';
+      }
+    }
+
+    /* SCENARIO 3: Timeline */
+    function resetScenario3() {
+      s3PlacedStack = [];
+      s3IsReveal = false;
+      render();
+    }
+
+    function initScenario3DOM() {
+      s3ColumnsGrid.innerHTML = '';
+      S3_STAGES.forEach((stage, idx) => {
+        const col = document.createElement('div');
+        col.className = 's3-column';
+        col.dataset.stage = idx;
+        const track = document.createElement('div');
+        track.className = 's3-track-row';
+        track.innerHTML = `<div class="s3-circle" id="s3Circle-${idx}"></div>` + (idx < S3_STAGES.length - 1 ? `<div class="s3-connector" id="s3Conn-${idx}"></div>` : '');
+        col.appendChild(track);
+        col.innerHTML += `<div class="s3-stage-name" id="s3StageName-${idx}">${stage.name}</div><div class="s3-drop-zone" id="s3DropZone-${idx}" data-stage="${idx}"></div>`;
+        s3ColumnsGrid.appendChild(col);
+      });
+
+      s3CardTray.innerHTML = '';
+      S3_CARDS.forEach(card => {
+        const cardEl = document.createElement('div');
+        cardEl.className = 's3-card';
+        cardEl.id = `s3Card-${card.id}`;
+        cardEl.dataset.id = card.id;
+        cardEl.dataset.stage = card.stage;
+        cardEl.tabIndex = 0;
+        cardEl.innerHTML = `<div class="s3-card-date">${card.date}</div><div class="s3-card-title">${card.title}</div>`;
+        bindScenario3CardEvents(cardEl, card);
+        s3CardTray.appendChild(cardEl);
+      });
+    }
+
+    function renderScenario3() {
+      const stepNum = s3IsReveal ? 11 : s3PlacedStack.length + 1;
+      currentStep = stepNum;
+      stepMeta.textContent = `FROM CALCULATION TO ACTION — STEP ${stepNum} OF 11`;
+      stepCounter.textContent = `${stepNum} / 11`;
+
+      if (s3IsReveal) {
+        updateHeadline("The same human question, every time");
+        btnNext.disabled = true;
+      } else if (s3PlacedStack.length === 0) {
+        updateHeadline("Moving thinking out of our heads");
+      } else {
+        const maxStage = Math.max(...s3PlacedStack.map(id => S3_CARDS.find(c => c.id === id).stage));
+        updateHeadline(["First, calculation", "Then, rules", "Then, learned patterns", "Now, generation", "Increasingly, action"][maxStage]);
+      }
+
+      s3CardTray.style.display = s3IsReveal ? 'none' : 'grid';
+      s3RevealPanel.style.display = s3IsReveal ? 'flex' : 'none';
+
+      const stageCounts = [0, 0, 0, 0, 0];
+      let maxS = -1;
+      s3PlacedStack.forEach(id => {
+        const c = S3_CARDS.find(x => x.id === id);
+        stageCounts[c.stage]++;
+        if (c.stage > maxS) maxS = c.stage;
+      });
+
+      S3_STAGES.forEach((_, idx) => {
+        const hc = stageCounts[idx] > 0;
+        document.getElementById(`s3Circle-${idx}`)?.classList.toggle('active', hc);
+        document.getElementById(`s3StageName-${idx}`)?.classList.toggle('active', hc);
+        if (idx < 4) document.getElementById(`s3Conn-${idx}`)?.classList.toggle('active', maxS >= idx + 1);
+      });
+    }
+
+    function recordCardPositions() {
+      const pos = new Map();
+      document.querySelectorAll('.s3-card').forEach(el => pos.set(el.id, el.getBoundingClientRect()));
+      return pos;
+    }
+
+    function playFLIPAnimation(firstPos) {
+      requestAnimationFrame(() => {
+        document.querySelectorAll('.s3-card').forEach(el => {
+          const first = firstPos.get(el.id);
+          if (!first) return;
+          const last = el.getBoundingClientRect();
+          const dx = first.left - last.left;
+          const dy = first.top - last.top;
+
+          if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+            el.style.transition = 'none';
+            el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+
+            requestAnimationFrame(() => {
+              el.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
+              el.style.transform = 'none';
+              const clean = () => {
+                el.style.transition = '';
+                el.removeEventListener('transitionend', clean);
+              };
+              el.addEventListener('transitionend', clean);
+            });
+          }
+        });
+      });
+    }
+
+    function placeCard(cardId, fromDrop = false, fromRect = null) {
+      if (s3PlacedStack.includes(cardId)) return;
+      const card = S3_CARDS.find(c => c.id === cardId);
+      const cardEl = document.getElementById(`s3Card-${cardId}`);
+      if (!cardEl) return;
+
+      const firstPos = recordCardPositions();
+      if (fromDrop && fromRect) firstPos.set(cardEl.id, fromRect);
+
+      s3PlacedStack.push(cardId);
+      cardEl.classList.add('placed');
+      cardEl.tabIndex = -1;
+
+      const dz = document.getElementById(`s3DropZone-${card.stage}`);
+      const cards = Array.from(dz.querySelectorAll('.s3-card'));
+      cards.push(cardEl);
+      cards.sort((a, b) => parseInt(a.dataset.id) - parseInt(b.dataset.id));
+      cards.forEach(c => dz.appendChild(c));
+
+      renderScenario3();
+      playFLIPAnimation(firstPos);
+    }
+
+    function unplaceLastCard() {
+      if (s3PlacedStack.length === 0) return;
+      const cardId = s3PlacedStack.pop();
+      const cardEl = document.getElementById(`s3Card-${cardId}`);
+      if (!cardEl) return;
+
+      const firstPos = recordCardPositions();
+      cardEl.classList.remove('placed');
+      cardEl.tabIndex = 0;
+
+      const trayCards = Array.from(s3CardTray.querySelectorAll('.s3-card'));
+      trayCards.push(cardEl);
+      trayCards.sort((a, b) => parseInt(a.dataset.id) - parseInt(b.dataset.id));
+      trayCards.forEach(c => s3CardTray.appendChild(c));
+
+      renderScenario3();
+      playFLIPAnimation(firstPos);
+    }
+
+    function bindScenario3CardEvents(cardEl, card) {
+      let isPD = false, isDrag = false, startX = 0, startY = 0, hZone = null;
+
+      cardEl.addEventListener('pointerdown', (e) => {
+        if (s3PlacedStack.includes(card.id) || (e.pointerType === 'mouse' && e.button !== 0)) return;
+        e.stopPropagation();
+        isPD = true;
+        isDrag = false;
+        startX = e.clientX;
+        startY = e.clientY;
+        hZone = null;
+      });
+
+      cardEl.addEventListener('pointermove', (e) => {
+        if (!isPD || s3PlacedStack.includes(card.id)) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        if (!isDrag && Math.hypot(dx, dy) > 6) {
+          isDrag = true;
+          try { cardEl.setPointerCapture(e.pointerId); } catch(err) {}
+          cardEl.classList.add('dragging');
+        }
+
+        if (isDrag) {
+          e.stopPropagation();
+          cardEl.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(1.04)`;
+          hZone = null;
+
+          document.querySelectorAll('.s3-drop-zone').forEach(z => {
+            const r = z.getBoundingClientRect();
+            const inside = (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top - 20 && e.clientY <= r.bottom + 20);
+            z.classList.toggle('drag-hover', inside);
+            if (inside) hZone = parseInt(z.dataset.stage);
+          });
+        }
+      });
+
+      const handlePU = (e) => {
+        if (!isPD) return;
+        isPD = false;
+        if (s3PlacedStack.includes(card.id)) return;
+        e.stopPropagation();
+
+        document.querySelectorAll('.s3-drop-zone').forEach(z => z.classList.remove('drag-hover'));
+
+        if (isDrag) {
+          isDrag = false;
+          try { cardEl.releasePointerCapture(e.pointerId); } catch(err) {}
+          cardEl.classList.remove('dragging');
+
+          if (hZone === card.stage) {
+            const r = cardEl.getBoundingClientRect();
+            cardEl.style.transform = 'none';
+            placeCard(card.id, true, r);
+          } else {
+            cardEl.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
+            cardEl.style.transform = 'translate3d(0,0,0)';
+            const cln = () => {
+              cardEl.style.transition = '';
+              cardEl.style.transform = 'none';
+              cardEl.removeEventListener('transitionend', cln);
+            };
+            cardEl.addEventListener('transitionend', cln);
+          }
+        } else {
+          placeCard(card.id);
+        }
+      };
+
+      cardEl.addEventListener('pointerup', handlePU);
+      cardEl.addEventListener('pointercancel', handlePU);
+
+      cardEl.addEventListener('keydown', (e) => {
+        if (!s3PlacedStack.includes(card.id) && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          placeCard(card.id);
+        }
+      });
+    }
+
+    /* SCENARIO 4: Interactive AI Lab */
+    function renderScenario4() {
+      s4Container.innerHTML = '';
+      if (currentStep === 1) renderLabTemperature();
+      else if (currentStep === 2) renderLabAttention();
+    }
+
+    function createInstructionBar(text) {
+      const bar = document.createElement('div');
+      bar.className = 'lab-instruction-bar';
+      bar.innerHTML = `<span class="lab-instruction-badge">Interactive</span><span class="lab-instruction-text">${text}</span>`;
+      return bar;
+    }
+
+    function renderLabTemperature() {
+      s4Container.appendChild(createInstructionBar("Drag slider or tap presets to see how temperature sharpens or flattens probability."));
+
+      const ctrl = document.createElement('div');
+      ctrl.className = 's4-temp-controls';
+      ctrl.innerHTML = `
+        <div style="font-size:13px; font-weight:600; color:#1D1D1F;">Temperature (T):</div>
+        <input type="range" class="s4-slider" id="tempSlider" min="0.1" max="1.5" step="0.05" value="${s4Temp}">
+        <span id="tempVal" style="font-size:14px; font-weight:700; color:#3D6BFF; width:42px;">${s4Temp.toFixed(2)}</span>
+        <div style="display:flex; gap:8px; margin-left:auto;">
+          <button class="pill-btn ${s4Temp <= 0.2 ? 'active' : ''}" id="pRigid">0.1 Rigid</button>
+          <button class="pill-btn ${s4Temp >= 0.65 && s4Temp <= 0.75 ? 'active' : ''}" id="pBal">0.7 Balanced</button>
+          <button class="pill-btn ${s4Temp >= 1.3 ? 'active' : ''}" id="pCreat">1.4 Creative</button>
+        </div>
+      `;
+
+      const barsWrapper = document.createElement('div');
+      barsWrapper.className = 's4-bars-box';
+      barsWrapper.innerHTML = `<div class="prediction-caption" style="margin-bottom:6px;">Calculated Softmax Probability Distribution:</div><div id="labBarsList" style="display:flex; flex-direction:column; gap:10px;"></div>`;
+
+      const sampleBox = document.createElement('div');
+      sampleBox.className = 's4-sample-output';
+      sampleBox.id = 'sampleOutput';
+
+      s4Container.appendChild(ctrl);
+      s4Container.appendChild(barsWrapper);
+      s4Container.appendChild(sampleBox);
+
+      const logits = [
+        { t: " promising", l: 4.2 },
+        { t: " uncertain", l: 3.5 },
+        { t: " evolving", l: 3.0 },
+        { t: " powerful", l: 2.5 },
+        { t: " unpredictable", l: 2.1 }
+      ];
+
+      function updateTemp(T) {
+        s4Temp = T;
+        document.getElementById('tempVal').textContent = T.toFixed(2);
+        document.querySelectorAll('.s4-temp-controls .pill-btn').forEach(b => b.classList.remove('active'));
+        if (T <= 0.2) document.getElementById('pRigid')?.classList.add('active');
+        else if (T >= 0.65 && T <= 0.75) document.getElementById('pBal')?.classList.add('active');
+        else if (T >= 1.3) document.getElementById('pCreat')?.classList.add('active');
+
+        const expVals = logits.map(i => Math.exp(i.l / T));
+        const sumExp = expVals.reduce((a, b) => a + b, 0);
+        const probs = logits.map((i, idx) => ({ t: i.t, p: Math.max(1, Math.round((expVals[idx] / sumExp) * 100)) }));
+
+        const listEl = document.getElementById('labBarsList');
+        listEl.innerHTML = '';
+        probs.forEach((item, index) => {
+          listEl.innerHTML += `
+            <div class="pred-row">
+              <div class="pred-label ${index === 0 ? 'selected' : ''}" style="font-size:14px;">${item.t}</div>
+              <div class="pred-bar-track" style="height:12px;">
+                <div class="pred-bar-fill ${index === 0 ? 'top-bar' : ''}" style="width: ${item.p}%;"></div>
+              </div>
+              <div class="pred-pct" style="font-size:14px;">${item.p}%</div>
+            </div>`;
+        });
+
+        const sEl = document.getElementById('sampleOutput');
+        if (T <= 0.35) sEl.innerHTML = `Prompt: <i>"The future of AI is..."</i><br>Completion: <b style="color:#2F5BEA;">promising. It systematically optimizes existing institutional workflows.</b> <span style="color:#6E6E73;">(Deterministic & rigid)</span>`;
+        else if (T <= 0.85) sEl.innerHTML = `Prompt: <i>"The future of AI is..."</i><br>Completion: <b style="color:#2F5BEA;">uncertain, presenting balanced opportunities and novel risks.</b> <span style="color:#6E6E73;">(Balanced natural language)</span>`;
+        else sEl.innerHTML = `Prompt: <i>"The future of AI is..."</i><br>Completion: <b style="color:#2F5BEA;">kaleidoscopic, breathing recursive mathematical dreamscapes.</b> <span style="color:#6E6E73;">(High entropy)</span>`;
+      }
+
+      document.getElementById('tempSlider').oninput = (e) => updateTemp(parseFloat(e.target.value));
+      document.getElementById('pRigid').onclick = () => { document.getElementById('tempSlider').value = 0.1; updateTemp(0.1); };
+      document.getElementById('pBal').onclick = () => { document.getElementById('tempSlider').value = 0.7; updateTemp(0.7); };
+      document.getElementById('pCreat').onclick = () => { document.getElementById('tempSlider').value = 1.4; updateTemp(1.4); };
+
+      updateTemp(s4Temp);
+    }
+
+    function renderLabAttention() {
+      s4Container.appendChild(createInstructionBar("Tap any word to trace attention weights, or toggle the context ending."));
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 's4-attention-wrapper';
+
+      const toggleRow = document.createElement('div');
+      toggleRow.style.display = 'flex';
+      toggleRow.style.justifyContent = 'space-between';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'btn';
+      toggleBtn.style.minHeight = '38px';
+      toggleBtn.style.fontSize = '13px';
+      toggleBtn.textContent = s4AttnVersion === 'tired' ? "Swap context ending: '...too wide'" : "Swap context ending: '...too tired'";
+      toggleRow.appendChild(toggleBtn);
+
+      const sentenceBox = document.createElement('div');
+      sentenceBox.className = 's4-attention-sentence';
+
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "s4-attn-svg");
+      sentenceBox.appendChild(svg);
+
+      const explanation = document.createElement('div');
+      explanation.className = 's4-sample-output';
+
+      wrapper.appendChild(toggleRow);
+      wrapper.appendChild(sentenceBox);
+      wrapper.appendChild(explanation);
+      s4Container.appendChild(wrapper);
+
+      function renderTokens() {
+        sentenceBox.querySelectorAll('.s4-token-btn').forEach(b => b.remove());
+        const words = s4AttnVersion === 'tired'
+          ? ["The", "animal", "didn't", "cross", "the", "street", "because", "it", "was", "too", "tired"]
+          : ["The", "animal", "didn't", "cross", "the", "street", "because", "it", "was", "too", "wide"];
+
+        words.forEach((w, idx) => {
+          const btn = document.createElement('button');
+          btn.className = 's4-token-btn';
+          btn.id = `attnWord-${idx}`;
+          btn.textContent = w;
+          btn.onclick = () => {
+            s4AttnSelected = idx;
+            updateAttention();
+          };
+          sentenceBox.appendChild(btn);
+        });
+
+        updateAttention();
+      }
+
+      function updateAttention() {
+        const words = s4AttnVersion === 'tired'
+          ? ["The", "animal", "didn't", "cross", "the", "street", "because", "it", "was", "too", "tired"]
+          : ["The", "animal", "didn't", "cross", "the", "street", "because", "it", "was", "too", "wide"];
+
+        sentenceBox.querySelectorAll('.s4-token-btn').forEach(b => {
+          b.className = 's4-token-btn';
+          b.querySelector('.attn-pct')?.remove();
+        });
+        svg.innerHTML = '';
+
+        const activeIdx = typeof s4AttnSelected === 'number' ? s4AttnSelected : words.indexOf("it");
+        const activeWord = words[activeIdx];
+        const activeBtn = document.getElementById(`attnWord-${activeIdx}`);
+        activeBtn?.classList.add('focus-word');
+
+        const itIdx = words.indexOf("it");
+        const animalIdx = words.indexOf("animal");
+        const streetIdx = words.indexOf("street");
+        const isTired = s4AttnVersion === 'tired';
+
+        let targetIdx = animalIdx, weight = isTired ? 0.88 : 0.12;
+
+        if (activeWord === "it") {
+          targetIdx = isTired ? animalIdx : streetIdx;
+          weight = isTired ? 0.88 : 0.86;
+          explanation.innerHTML = isTired
+            ? `When clause ends in <b>"tired"</b>, self-attention maps <b style="color:#2F5BEA;">"it" → "animal" (88%)</b> based on biological agency.`
+            : `When clause ends in <b>"wide"</b>, self-attention maps <b style="color:#2F5BEA;">"it" → "street" (86%)</b> based on spatial obstacle attributes.`;
+        } else if (activeWord === "animal") {
+          targetIdx = words.indexOf("cross");
+          weight = 0.72;
+          explanation.innerHTML = `Inspecting <b>"animal"</b>: strongest syntactic verb link maps to <b style="color:#2F5BEA;">"cross" (72%)</b>.`;
+        } else {
+          targetIdx = itIdx;
+          weight = 0.45;
+          explanation.innerHTML = `Inspecting <b>"${activeWord}"</b>: attention distributes across context dependencies.`;
+        }
+
+        const targetBtn = document.getElementById(`attnWord-${targetIdx}`);
+        targetBtn?.classList.add('target-word');
+
+        const b = document.createElement('span');
+        b.className = 'attn-pct';
+        b.textContent = Math.round(weight * 100) + '%';
+        targetBtn?.appendChild(b);
+
+        if (activeBtn && targetBtn) {
+          /* Precise top-edge anchor calculation to eliminate mid-air floating gap */
+          const boxRect = sentenceBox.getBoundingClientRect();
+          const r1 = activeBtn.getBoundingClientRect();
+          const r2 = targetBtn.getBoundingClientRect();
+
+          const x1 = r1.left + r1.width / 2 - boxRect.left;
+          const y1 = r1.top - boxRect.top;
+          const x2 = r2.left + r2.width / 2 - boxRect.left;
+          const y2 = r2.top - boxRect.top;
+
+          const mx = (x1 + x2) / 2;
+          const peak = Math.max(10, Math.min(y1, y2) - Math.min(50, Math.abs(x1 - x2) * 0.28));
+
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", `M ${x1} ${y1} Q ${mx} ${peak} ${x2} ${y2}`);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", "#3D6BFF");
+          path.setAttribute("stroke-width", "3");
+          path.setAttribute("stroke-opacity", "0.95");
+          svg.appendChild(path);
+        }
+      }
+
+      toggleBtn.onclick = () => {
+        s4AttnVersion = s4AttnVersion === 'tired' ? 'wide' : 'tired';
+        toggleBtn.textContent = s4AttnVersion === 'tired' ? "Swap context ending: '...too wide'" : "Swap context ending: '...too tired'";
+        s4AttnSelected = 7;
+        renderTokens();
+      };
+
+      requestAnimationFrame(renderTokens);
+    }
+
+    /* SCENARIO 5: Interactive Showcase */
+    function renderScenario5() {
+      s5Container.innerHTML = '';
+      if (currentStep === 1) renderS5Particles();
+      else if (currentStep === 2) renderS5Cards3D();
+      else if (currentStep === 3) renderS5Sortable();
+      else if (currentStep === 4) renderS5Chart();
+      else if (currentStep === 5) renderS5Waves();
+      else if (currentStep === 6) renderS5Canvas();
+    }
+
+    // 5.1 Physics
+    function renderS5Particles() {
+      s5Container.appendChild(createInstructionBar("Drag or touch across the empty box to spawn bouncing physics particles."));
+      const area = document.createElement('div');
+      area.className = 's5-demo-area';
+      const cvs = document.createElement('canvas');
+      cvs.style.width = '100%';
+      cvs.style.height = '100%';
+      area.appendChild(cvs);
+      s5Container.appendChild(area);
+
+      const ctx = cvs.getContext('2d');
+      let particles = [];
+      let w = 0, h = 0;
+
+      const resize = () => {
+        w = cvs.width = area.clientWidth;
+        h = cvs.height = area.clientHeight;
+      };
+      resize();
+
+      const loop = () => {
+        ctx.clearRect(0, 0, w, h);
+        for (let i = 0; i < particles.length; i++) {
+          let p = particles[i];
+          p.vy += 0.4;
+          p.x += p.vx;
+          p.y += p.vy;
+
+          if (p.x + p.r > w || p.x - p.r < 0) {
+            p.vx *= -0.8;
+            p.x = p.x + p.r > w ? w - p.r : p.r;
+          }
+          if (p.y + p.r > h) {
+            p.vy *= -0.8;
+            p.y = h - p.r;
+          }
+
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = p.c;
+          ctx.fill();
+        }
+        globalAnimFrame = requestAnimationFrame(loop);
+      };
+      loop();
+
+      const spawn = (x, y) => {
+        if (particles.length > 80) particles.shift();
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 10,
+          vy: (Math.random() - 1) * 10,
+          r: Math.random() * 8 + 4,
+          c: Math.random() > 0.5 ? '#3D6BFF' : '#F5A623'
+        });
+      };
+
+      let md = false;
+      cvs.onpointerdown = (e) => { md = true; spawn(e.offsetX, e.offsetY); };
+      cvs.onpointerup = () => md = false;
+      cvs.onpointerleave = () => md = false;
+      cvs.onpointermove = (e) => { if (md) spawn(e.offsetX, e.offsetY); };
+    }
+
+    // 5.2 3D Cards
+    function renderS5Cards3D() {
+      s5Container.appendChild(createInstructionBar("Move your pointer/finger around the box to tilt the matrix in 3D space."));
+      const area = document.createElement('div');
+      area.className = 's5-demo-area';
+      const grid = document.createElement('div');
+      grid.className = 's5-grid-3d';
+
+      for (let i = 0; i < 9; i++) {
+        const c = document.createElement('div');
+        c.className = 's5-3d-card';
+        c.textContent = `Card ${i + 1}`;
+        grid.appendChild(c);
+      }
+      area.appendChild(grid);
+      s5Container.appendChild(area);
+
+      area.onpointermove = (e) => {
+        const rect = area.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const rx = ((y / rect.height) - 0.5) * -30;
+        const ry = ((x / rect.width) - 0.5) * 30;
+        grid.querySelectorAll('.s5-3d-card').forEach(c => c.style.transform = `rotateX(${rx}deg) rotateY(${ry}deg) translateZ(10px)`);
+      };
+
+      area.onpointerleave = () => {
+        grid.querySelectorAll('.s5-3d-card').forEach(c => c.style.transform = `rotateX(0) rotateY(0) translateZ(0)`);
+      };
+    }
+
+    // 5.3 Sortable FLIP
+    function renderS5Sortable() {
+      s5Container.appendChild(createInstructionBar("Drag items up or down to seamlessly reorder the list using FLIP animation."));
+      const area = document.createElement('div');
+      area.className = 's5-demo-area';
+      const list = document.createElement('div');
+      list.className = 's5-sort-list';
+
+      ["1 · Foundation Model Weights", "2 · Fine-Tuning Dataset", "3 · Safety Alignment Guardrails", "4 · Agent Tool Execution"].forEach((t, i) => {
+        const el = document.createElement('div');
+        el.className = 's5-sort-item';
+        el.id = `srt-${i}`;
+        el.innerHTML = `<span>${t}</span><span style="color:#D2D2D7; font-size:18px;">≡</span>`;
+        list.appendChild(el);
+      });
+      area.appendChild(list);
+      s5Container.appendChild(area);
+
+      let dragEl = null, startY = 0, currY = 0;
+
+      list.onpointerdown = (e) => {
+        const item = e.target.closest('.s5-sort-item');
+        if (!item) return;
+        e.stopPropagation();
+        dragEl = item;
+        startY = e.clientY;
+        dragEl.classList.add('dragging');
+        dragEl.setPointerCapture(e.pointerId);
+      };
+
+      list.onpointermove = (e) => {
+        if (!dragEl) return;
+        e.stopPropagation();
+        currY = e.clientY - startY;
+        dragEl.style.transform = `translateY(${currY}px)`;
+
+        const items = [...list.querySelectorAll('.s5-sort-item:not(.dragging)')];
+        const swap = items.find(sib => {
+          const rect = sib.getBoundingClientRect();
+          return e.clientY > rect.top && e.clientY < rect.bottom;
+        });
+
+        if (swap && swap !== dragEl) {
+          const rect = swap.getBoundingClientRect();
+          if (e.clientY < rect.top + rect.height / 2) list.insertBefore(dragEl, swap);
+          else list.insertBefore(dragEl, swap.nextSibling);
+          startY = e.clientY;
+          currY = 0;
+          dragEl.style.transform = 'translateY(0)';
+        }
+      };
+
+      const stop = (e) => {
+        if (!dragEl) return;
+        e.stopPropagation();
+        dragEl.classList.remove('dragging');
+        dragEl.style.transform = '';
+        try { dragEl.releasePointerCapture(e.pointerId); } catch(err) {}
+        dragEl = null;
+      };
+
+      list.onpointerup = stop;
+      list.onpointercancel = stop;
+    }
+
+    // 5.4 Morphing Chart
+    function renderS5Chart() {
+      s5Container.appendChild(createInstructionBar("Tap 'Randomize Data' to watch CSS transitions fluidly morph the data visualization."));
+      const wrapper = document.createElement('div');
+      wrapper.style.display = 'flex';
+      wrapper.style.flexDirection = 'column';
+      wrapper.style.alignItems = 'center';
+      wrapper.style.gap = '20px';
+      wrapper.style.width = '100%';
+      wrapper.style.paddingTop = '10px';
+
+      const chart = document.createElement('div');
+      chart.className = 's5-chart-box';
+
+      const bars = [];
+      for (let i = 0; i < 8; i++) {
+        const b = document.createElement('div');
+        b.className = 's5-bar';
+        bars.push(b);
+        chart.appendChild(b);
+      }
+
+      const btn = document.createElement('button');
+      btn.className = 'btn';
+      btn.textContent = "Randomize Data";
+
+      const rand = () => bars.forEach(b => b.style.height = (Math.random() * 85 + 15) + '%');
+      btn.onclick = (e) => { e.stopPropagation(); rand(); };
+      rand();
+
+      wrapper.appendChild(chart);
+      wrapper.appendChild(btn);
+
+      const area = document.createElement('div');
+      area.className = 's5-demo-area';
+      area.appendChild(wrapper);
+      s5Container.appendChild(area);
+    }
+
+    // 5.5 Wave Grid
+    function renderS5Waves() {
+      s5Container.appendChild(createInstructionBar("Tap anywhere in the dot grid to trigger a radial wave propagation effect."));
+      const area = document.createElement('div');
+      area.className = 's5-demo-area';
+      const grid = document.createElement('div');
+      grid.className = 's5-wave-grid';
+
+      const dots = [];
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 12; c++) {
+          const d = document.createElement('div');
+          d.className = 's5-wave-dot';
+          d.dataset.r = r;
+          d.dataset.c = c;
+          dots.push(d);
+          grid.appendChild(d);
+        }
+      }
+      area.appendChild(grid);
+      s5Container.appendChild(area);
+
+      grid.onpointerdown = (e) => {
+        e.stopPropagation();
+        const trg = e.target.closest('.s5-wave-dot');
+        if (!trg) return;
+        const tr = parseInt(trg.dataset.r), tc = parseInt(trg.dataset.c);
+
+        dots.forEach(d => {
+          const dist = Math.hypot(parseInt(d.dataset.r) - tr, parseInt(d.dataset.c) - tc);
+          setTimeout(() => {
+            d.classList.add('active');
+            setTimeout(() => d.classList.remove('active'), 200);
+          }, dist * 45);
+        });
+      };
+    }
+
+    // 5.6 Drawing Canvas
+    function renderS5Canvas() {
+      s5Container.appendChild(createInstructionBar("Drag your finger or mouse across the box to sketch smooth vector strokes."));
+      const area = document.createElement('div');
+      area.className = 's5-demo-area';
+      const cvs = document.createElement('canvas');
+      cvs.style.width = '100%';
+      cvs.style.height = '100%';
+      area.appendChild(cvs);
+
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'btn';
+      clearBtn.textContent = 'Clear Canvas';
+      clearBtn.style.position = 'absolute';
+      clearBtn.style.top = '12px';
+      clearBtn.style.right = '12px';
+      clearBtn.style.minHeight = '36px';
+      clearBtn.style.fontSize = '12px';
+      area.appendChild(clearBtn);
+
+      s5Container.appendChild(area);
+
+      const ctx = cvs.getContext('2d');
+      let md = false;
+
+      const resize = () => {
+        cvs.width = area.clientWidth;
+        cvs.height = area.clientHeight;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = '#3D6BFF';
+      };
+      resize();
+
+      cvs.onpointerdown = (e) => {
+        md = true;
+        e.stopPropagation();
+        cvs.setPointerCapture(e.pointerId);
+        ctx.beginPath();
+        ctx.moveTo(e.offsetX, e.offsetY);
+      };
+
+      cvs.onpointermove = (e) => {
+        if (!md) return;
+        e.stopPropagation();
+        ctx.lineTo(e.offsetX, e.offsetY);
+        ctx.stroke();
+      };
+
+      const stop = (e) => {
+        if (!md) return;
+        md = false;
+        try { cvs.releasePointerCapture(e.pointerId); } catch(err) {}
+      };
+
+      cvs.onpointerup = stop;
+      cvs.onpointercancel = stop;
+      clearBtn.onclick = (e) => {
+        e.stopPropagation();
+        ctx.clearRect(0, 0, cvs.width, cvs.height);
+      };
+    }
+
+    /* Master Step Navigation */
+    function nextStep(isAuto = false) {
+      if (currentScenario === 3) {
+        if (s3PlacedStack.length < S3_CARDS.length) {
+          const nextCard = S3_CARDS.find(c => !s3PlacedStack.includes(c.id));
+          if (nextCard) placeCard(nextCard.id);
+        } else if (!s3IsReveal) {
+          s3IsReveal = true;
+          renderScenario3();
+        }
+        return;
+      }
+
+      if (currentStep < scenariosConfig[currentScenario].totalSteps) {
+        currentStep++;
+        render();
+      }
+    }
+
+    function prevStep() {
+      if (currentScenario === 3) {
+        if (s3IsReveal) {
+          s3IsReveal = false;
+          renderScenario3();
+        } else if (s3PlacedStack.length > 0) {
+          unplaceLastCard();
+        }
+        return;
+      }
+
+      if (currentScenario === 1 && (currentStep === 8 || currentStep === 9)) {
+        currentStep = 6;
+      } else if (currentStep > 1) {
+        currentStep--;
+      }
+      render();
+    }
+
+    function setScenario(scenNum) {
+      currentScenario = scenNum;
+      currentStep = 1;
+      document.querySelectorAll('#btnScen1, #btnScen2, #btnScen3, #btnScen4, #btnScen5').forEach((b, idx) => {
+        b.classList.toggle('active', idx + 1 === scenNum);
+      });
+
+      if (scenNum === 3) resetScenario3();
+      else render();
+    }
+
+    /* Frame Swipe & Tap Gestures */
+    let tX = 0, tY = 0, hTimer = null;
+
+    frame.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button, input, canvas, .s3-card, .s5-sort-list, .s5-wave-grid, .modal-box, .s5-demo-area, .s4-attention-sentence, .s4-temp-controls')) return;
+      tX = e.clientX;
+      tY = e.clientY;
+      hTimer = setTimeout(() => {
+        document.body.classList.toggle('clean-mode');
+        hTimer = null;
+      }, 700);
+    });
+
+    frame.addEventListener('pointermove', (e) => {
+      if (hTimer && (Math.abs(e.clientX - tX) > 10 || Math.abs(e.clientY - tY) > 10)) {
+        clearTimeout(hTimer);
+        hTimer = null;
+      }
+    });
+
+    frame.addEventListener('pointerup', (e) => {
+      if (e.target.closest('button, input, canvas, .s3-card, .s5-sort-list, .s5-wave-grid, .modal-box, .s5-demo-area, .s4-attention-sentence, .s4-temp-controls')) return;
+      if (!hTimer) return;
+      clearTimeout(hTimer);
+      hTimer = null;
+
+      const dX = e.clientX - tX;
+      const dY = e.clientY - tY;
+
+      if (Math.abs(dX) > 40 && Math.abs(dY) < 60) {
+        if (dX < 0) nextStep();
+        else prevStep();
+        return;
+      }
+
+      const rect = frame.getBoundingClientRect();
+      if ((e.clientX - rect.left) / rect.width > 0.3) nextStep();
+      else prevStep();
+    });
+
+    frame.addEventListener('pointercancel', () => {
+      clearTimeout(hTimer);
+      hTimer = null;
+    });
+
+    /* Controls bindings */
+    document.getElementById('btnScen1').onclick = () => setScenario(1);
+    document.getElementById('btnScen2').onclick = () => setScenario(2);
+    document.getElementById('btnScen3').onclick = () => setScenario(3);
+    document.getElementById('btnScen4').onclick = () => setScenario(4);
+    document.getElementById('btnScen5').onclick = () => setScenario(5);
+
+    document.getElementById('btnNext').onclick = () => nextStep();
+    document.getElementById('btnBack').onclick = () => prevStep();
+
+    document.getElementById('btnClean').onclick = () => document.body.classList.toggle('clean-mode');
+
+    function toggleFullscreen() {
+      const d = document.documentElement;
+      const active = document.fullscreenElement || document.webkitFullscreenElement;
+      const fn = active ? (document.exitFullscreen || document.webkitExitFullscreen)
+                        : (d.requestFullscreen || d.webkitRequestFullscreen);
+      try { const r = fn && fn.call(active ? document : d); if (r && r.catch) r.catch(() => {}); } catch (err) {}
+    }
+    document.getElementById('btnFull').onclick = toggleFullscreen;
+    const isHomeScreenApp = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    if (isHomeScreenApp || !(document.fullscreenEnabled || document.webkitFullscreenEnabled)) {
+      document.getElementById('btnFull').style.display = 'none';
+    }
+
+    document.getElementById('btnProgress').onclick = () => {
+      showProgress = !showProgress;
+      progressMarks.style.display = showProgress ? 'flex' : 'none';
+    };
+
+    const helpModal = document.getElementById('helpModal');
+    document.getElementById('btnHelp').onclick = () => helpModal.classList.add('open');
+    document.getElementById('btnCloseHelp').onclick = () => helpModal.classList.remove('open');
+    helpModal.onclick = (e) => { if (e.target === helpModal) helpModal.classList.remove('open'); };
+
+    /* Keybindings */
+    window.addEventListener('keydown', (e) => {
+      if (['ArrowRight', ' ', 'PageDown'].includes(e.key)) {
+        e.preventDefault();
+        nextStep();
+      } else if (['ArrowLeft', 'PageUp'].includes(e.key)) {
+        e.preventDefault();
+        prevStep();
+      } else if (e.key >= '1' && e.key <= '5') {
+        setScenario(parseInt(e.key));
+      } else if (e.key.toLowerCase() === 'r') {
+        if (currentScenario === 3) resetScenario3();
+        else { currentStep = 1; render(); }
+      } else if (e.key.toLowerCase() === 'c' || e.key === 'Escape') {
+        document.body.classList.toggle('clean-mode');
+      } else if (e.key.toLowerCase() === 'f') {
+        toggleFullscreen();
+      } else if (e.key.toLowerCase() === 'p') {
+        showProgress = !showProgress;
+        progressMarks.style.display = showProgress ? 'flex' : 'none';
+      }
+    });
+
+    /* iPad fit: the 16:9 frame always fills the space left on screen */
+    const controlsEl = document.getElementById('controls');
+    const footnoteEl = document.querySelector('.footnote');
+    function fitFrame() {
+      const clean = document.body.classList.contains('clean-mode');
+      const cs = getComputedStyle(document.body);
+      const availW = document.documentElement.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      let availH = window.innerHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      if (!clean) {
+        const gap = (el) => parseFloat(getComputedStyle(el).marginTop) || 0;
+        availH -= controlsEl.offsetHeight + gap(controlsEl) + footnoteEl.offsetHeight + gap(footnoteEl);
+      }
+      const w = Math.floor(Math.max(240, Math.min(availW, availH * 16 / 9)));
+      frame.style.width = w + 'px';
+    }
+    window.addEventListener('resize', fitFrame);
+    window.addEventListener('orientationchange', () => setTimeout(fitFrame, 300));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', fitFrame);
+    new MutationObserver(fitFrame).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitFrame);
+
+    initScenario3DOM();
+    fitFrame();
+    render();
+  </script>
+</body>
+</html>
